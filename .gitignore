@@ -70,3 +70,15 @@ figures/
 *.jpg
 *.jpeg
 !docs/images/
+__pycache__/
+*.pyc
+
+checkpoints/
+models/*.pth
+models/*.pt
+
+data/*.csv
+
+.env
+venv/
+

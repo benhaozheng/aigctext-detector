@@ -5,6 +5,11 @@
 """
 
 import os
+import sys
+
+# 添加项目根目录到路径
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import json
 import argparse
 import numpy as np
@@ -20,8 +25,9 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # 设置中文字体
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
-plt.rcParams['axes.unicode_minus'] = False
+# 设置中文字体（自动检测）
+from utils.font_config import setup_chinese_font
+setup_chinese_font()
 
 from models.bert_model import BERTClassifier
 from models.fusion_model import FusionModel
@@ -48,7 +54,11 @@ def load_sample_data(csv_path: str = "./data/sample_data.csv"):
         if os.path.exists(path):
             print(f"从CSV文件加载数据: {path}")
             try:
-                df = pd.read_csv(path)
+                # 处理BOM编码问题和格式问题
+                if 'hc3' in path:
+                    df = pd.read_csv(path, encoding='utf-8-sig', on_bad_lines='skip')
+                else:
+                    df = pd.read_csv(path, on_bad_lines='skip')
 
                 # 验证数据格式
                 if 'text' not in df.columns or 'label' not in df.columns:
@@ -84,6 +94,24 @@ def load_sample_data(csv_path: str = "./data/sample_data.csv"):
     if dfs:
         combined_df = pd.concat(dfs, ignore_index=True)
         print(f"\n✅ 总计加载 {len(combined_df)} 条数据")
+
+        # 检查数据平衡性
+        ai_count = sum(combined_df['label'] == 'AI')
+        human_count = sum(combined_df['label'] == 'Human')
+        print(f"   AI: {ai_count}, Human: {human_count}")
+
+        # 数据平衡：如果比例超过2:1，则进行下采样
+        if ai_count > 0 and human_count > 0:
+            ratio = max(ai_count, human_count) / min(ai_count, human_count)
+            if ratio > 2.0:
+                print(f"\n⚠️ 数据不平衡 (比例 {ratio:.2f}:1)，进行平衡采样...")
+                # 对多数类进行下采样
+                min_count = min(ai_count, human_count)
+                ai_df = combined_df[combined_df['label'] == 'AI'].sample(n=min(ai_count, min_count), random_state=42)
+                human_df = combined_df[combined_df['label'] == 'Human'].sample(n=min(human_count, min_count), random_state=42)
+                combined_df = pd.concat([ai_df, human_df], ignore_index=True)
+                print(f"✅ 平衡后: {len(combined_df)} 条数据 (AI: {sum(combined_df['label']=='AI')}, Human: {sum(combined_df['label']=='Human')})")
+
         return combined_df
     else:
         print("\n⚠️ 没有成功加载任何CSV文件")
@@ -394,7 +422,7 @@ def main():
     parser = argparse.ArgumentParser(description='训练AI检测模型')
     # 默认使用中文HC3数据集 + 示例数据
     parser.add_argument('--data', type=str,
-                       default='./data/hc3_all.csv,./data/sample_data.csv',
+                       default='./data/hc3_all_fixed.csv,./data/ai_vs_human_text_2026.csv,./data/sample_data.csv',
                        help='训练数据CSV文件路径（支持多个文件，用逗号分隔）')
     parser.add_argument('--bert_epochs', type=int, default=3, help='BERT训练轮数')
     parser.add_argument('--fusion_epochs', type=int, default=10, help='融合模型训练轮数')

@@ -5,6 +5,11 @@
 """
 
 import os
+import sys
+
+# 添加项目根目录到路径
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import argparse
 import numpy as np
 import pandas as pd
@@ -14,8 +19,9 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # 设置中文字体
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
-plt.rcParams['axes.unicode_minus'] = False
+# 设置中文字体（自动检测）
+from utils.font_config import setup_chinese_font
+setup_chinese_font()
 
 from models.bert_model import BERTClassifier
 from models.fusion_model import FusionModel
@@ -85,11 +91,12 @@ class AIDetector:
             except:
                 pass
 
-        # 创建融合模型
+        # 创建融合模型（使用与训练时相同的hidden_dims）
         fusion = FusionModel(
             bert_model=bert,
             feature_dim=11,
-            device=self.device
+            device=self.device,
+            hidden_dims=[256, 128, 64]
         )
 
         fusion_checkpoint = f"./checkpoints/fusion_{language}_best.pt"

@@ -169,7 +169,7 @@ class FusionModel:
 
         if features_list:
             # 使用预计算的特征
-            from ..utils.features import FeatureExtractor
+            from utils.features import FeatureExtractor
             extractor = FeatureExtractor()
             features = np.array([extractor.features_to_vector(f) for f in features_list])
         else:
@@ -342,7 +342,7 @@ class FusionModel:
             embedding = np.zeros(768)
 
         # 转换特征
-        from ..utils.features import FeatureExtractor
+        from utils.features import FeatureExtractor
         extractor = FeatureExtractor()
         feature_vector = extractor.features_to_vector(features)
 

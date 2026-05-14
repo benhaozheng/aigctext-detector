@@ -127,13 +127,14 @@ class TextPreprocessor:
 
         return sentences
 
-    def split_paragraphs(self, text: str) -> List[str]:
+    def split_paragraphs(self, text: str, sentences_per_paragraph: int = 6) -> List[str]:
         """
         分段
-        将文本按段落分割
+        将文本按段落分割，支持智能分段
 
         Args:
             text: 输入文本
+            sentences_per_paragraph: 每段包含的最大句子数（用于智能分段）
 
         Returns:
             段落列表
@@ -141,13 +142,28 @@ class TextPreprocessor:
         if not text:
             return []
 
-        # 按换行符分段
+        # 先按换行符分段
         paragraphs = re.split(r'\n\s*\n', text)
 
         # 清理每个段落
         paragraphs = [p.strip() for p in paragraphs if p.strip()]
 
-        return paragraphs
+        # 智能分段：处理过长的段落
+        result = []
+        for para in paragraphs:
+            # 如果段落太长（超过300字或超过指定句子数），则切分
+            if len(para) > 300:
+                # 按句子分割
+                sentences = self.split_sentences(para)
+                # 每N个句子组成一段
+                for i in range(0, len(sentences), sentences_per_paragraph):
+                    chunk = ''.join(sentences[i:i + sentences_per_paragraph])
+                    if chunk.strip():
+                        result.append(chunk.strip())
+            else:
+                result.append(para)
+
+        return result
 
     def tokenize(self, text: str, language: Optional[str] = None) -> List[str]:
         """

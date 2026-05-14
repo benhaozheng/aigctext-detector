@@ -238,6 +238,7 @@ class BERTClassifier:
             val_dataset = self._create_dataset(val_texts, val_labels_num)
 
         # 训练参数
+                # 训练参数
         training_args = TrainingArguments(
             output_dir=output_dir,
             num_train_epochs=num_epochs,
@@ -249,9 +250,7 @@ class BERTClassifier:
             logging_steps=100,
             evaluation_strategy="epoch" if val_dataset else "no",
             save_strategy="epoch" if val_dataset else "no",
-            load_best_model_at_end=True if val_dataset else False,
-            metric_for_best_model="eval_f1" if val_dataset else None,
-            greater_is_better=True,
+            load_best_model_at_end=False,  # 简化设置，避免指标检查问题
             learning_rate=learning_rate,
             report_to="none",  # 不使用wandb等
             save_total_limit=2
@@ -306,22 +305,32 @@ class BERTClassifier:
 
         class CustomTrainer(Trainer):
             def compute_metrics(self, eval_pred):
-                from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+                try:
+                    from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 
-                logits, labels = eval_pred
-                predictions = np.argmax(logits, axis=-1)
+                    logits, labels = eval_pred
+                    predictions = np.argmax(logits, axis=-1)
 
-                accuracy = accuracy_score(labels, predictions)
-                precision, recall, f1, _ = precision_recall_fscore_support(
-                    labels, predictions, average='binary', zero_division=0
-                )
+                    accuracy = accuracy_score(labels, predictions)
+                    precision, recall, f1, _ = precision_recall_fscore_support(
+                        labels, predictions, average='binary', zero_division=0
+                    )
 
-                return {
-                    'accuracy': accuracy,
-                    'precision': precision,
-                    'recall': recall,
-                    'f1': f1
-                }
+                    return {
+                        'accuracy': accuracy,
+                        'precision': precision,
+                        'recall': recall,
+                        'f1': f1
+                    }
+                except Exception as e:
+                    print(f"计算指标时出错: {e}")
+                    # 返回默认值避免训练中断
+                    return {
+                        'accuracy': 0.0,
+                        'precision': 0.0,
+                        'recall': 0.0,
+                        'f1': 0.0
+                    }
 
         return CustomTrainer(
             model=model,

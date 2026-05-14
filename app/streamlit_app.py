@@ -16,6 +16,10 @@ from io import StringIO
 # 添加项目路径
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+# 设置中文字体（自动检测）
+from utils.font_config import setup_chinese_font
+setup_chinese_font()
+
 # 设置页面配置
 st.set_page_config(
     page_title="EduGuard - AI作业原创性检测系统",
@@ -23,10 +27,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
-
-# 设置中文字体
-plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei']
-plt.rcParams['axes.unicode_minus'] = False
 
 # 导入模型和工具
 from models.bert_model import BERTClassifier
@@ -77,22 +77,29 @@ def load_models(language: str = 'zh'):
         if os.path.exists(checkpoint_base):
             try:
                 bert.load_from_checkpoint(checkpoint_base)
-            except:
-                pass
+                print(f"✅ BERT检查点加载成功: {checkpoint_base}")
+            except Exception as e:
+                print(f"⚠️ BERT检查点加载失败: {e}")
+        else:
+            print(f"⚠️ BERT检查点不存在: {checkpoint_base}")
 
-        # 加载融合模型
+        # 加载融合模型（使用与训练时相同的hidden_dims）
         fusion = FusionModel(
             bert_model=bert,
             feature_dim=11,
-            device=device
+            device=device,
+            hidden_dims=[256, 128, 64]
         )
 
         fusion_checkpoint = f"./checkpoints/fusion_{language}_best.pt"
         if os.path.exists(fusion_checkpoint):
             try:
                 fusion.load_model(fusion_checkpoint)
-            except:
-                pass
+                print(f"✅ 融合模型检查点加载成功: {fusion_checkpoint}")
+            except Exception as e:
+                print(f"⚠️ 融合模型检查点加载失败: {e}")
+        else:
+            print(f"⚠️ 融合模型检查点不存在: {fusion_checkpoint}")
 
         # 初始化工具
         preprocessor = TextPreprocessor(language=language)
@@ -165,17 +172,17 @@ def render_probability_gauge(ai_prob):
 
     if ai_prob < 0.3:
         color = '#2ecc71'
-        level = '低风险'
+        level = 'Low Risk'
     elif ai_prob < 0.7:
         color = '#f39c12'
-        level = '中风险'
+        level = 'Medium Risk'
     else:
         color = '#e74c3c'
-        level = '高风险'
+        level = 'High Risk'
 
-    ax.barh(['AI生成概率'], [ai_prob], color=color, height=0.5)
+    ax.barh(['AI Probability'], [ai_prob], color=color, height=0.5)
     ax.set_xlim(0, 1)
-    ax.set_xlabel('概率', fontsize=10)
+    ax.set_xlabel('Probability', fontsize=10)
     ax.set_title(f'{level} ({ai_prob:.1%})', fontsize=12, fontweight='bold')
 
     # 添加阈值线
@@ -192,20 +199,20 @@ def render_originality_score(score):
 
     if score >= 70:
         color = '#2ecc71'
-        level = '优秀'
+        level = 'Excellent'
     elif score >= 40:
         color = '#f39c12'
-        level = '及格'
+        level = 'Pass'
     else:
         color = '#e74c3c'
-        level = '需改进'
+        level = 'Needs Work'
 
-    ax.barh(['原创性评分'], [score], color=color, height=0.5)
+    ax.barh(['Originality Score'], [score], color=color, height=0.5)
     ax.set_xlim(0, 100)
-    ax.set_xlabel('分数', fontsize=10)
+    ax.set_xlabel('Score', fontsize=10)
     ax.set_title(f'{level} ({score:.1f}/100)', fontsize=12, fontweight='bold')
 
-    ax.axvline(x=60, color='gray', linestyle='--', alpha=0.3, linewidth=1, label='及格线')
+    ax.axvline(x=60, color='gray', linestyle='--', alpha=0.3, linewidth=1, label='Passing Line')
 
     plt.tight_layout()
     return fig
@@ -215,8 +222,8 @@ def render_feature_radar(features):
     """渲染特征雷达图"""
     fig, ax = plt.subplots(figsize=(5, 5), subplot_kw=dict(projection='polar'))
 
-    feature_names = ['困惑度\n(反向)', 'TTR\n词汇多样性', '句长均值\n(归一化)',
-                     'HWV\n写作方差', '句法复杂度']
+    feature_names = ['PPL\n(Inv)', 'TTR\n(Vocab)', 'Sent Len\n(Norm)',
+                     'HWV\n(Variance)', 'Syntax\nComplex']
 
     # 归一化特征值到0-1
     feature_values = [
@@ -236,7 +243,7 @@ def render_feature_radar(features):
     ax.set_xticks(angles[:-1])
     ax.set_xticklabels(feature_names, fontsize=9)
     ax.set_ylim(0, 1)
-    ax.set_title('文本特征分析', fontsize=12, fontweight='bold', pad=20)
+    ax.set_title('Text Feature Analysis', fontsize=12, fontweight='bold', pad=20)
 
     plt.tight_layout()
     return fig
@@ -259,9 +266,9 @@ def render_paragraph_risk(paragraph_results):
         ax.text(bar.get_x() + bar.get_width()/2., height,
                 f'{prob:.2f}', ha='center', va='bottom', fontsize=8)
 
-    ax.set_xlabel('段落编号', fontsize=10)
-    ax.set_ylabel('AI生成概率', fontsize=10)
-    ax.set_title('各段落AI生成概率分布', fontsize=12, fontweight='bold')
+    ax.set_xlabel('Paragraph No.', fontsize=10)
+    ax.set_ylabel('AI Probability', fontsize=10)
+    ax.set_title('AI Probability by Paragraph', fontsize=12, fontweight='bold')
     ax.axhline(y=0.3, color='gray', linestyle='--', alpha=0.3, linewidth=1)
     ax.axhline(y=0.7, color='gray', linestyle='--', alpha=0.3, linewidth=1)
     ax.set_ylim(0, 1)
@@ -269,9 +276,9 @@ def render_paragraph_risk(paragraph_results):
     # 添加图例
     from matplotlib.patches import Patch
     legend_elements = [
-        Patch(facecolor='#2ecc71', label='低风险 (<30%)'),
-        Patch(facecolor='#f39c12', label='中风险 (30%-70%)'),
-        Patch(facecolor='#e74c3c', label='高风险 (>70%)')
+        Patch(facecolor='#2ecc71', label='Low Risk (<30%)'),
+        Patch(facecolor='#f39c12', label='Medium Risk (30%-70%)'),
+        Patch(facecolor='#e74c3c', label='High Risk (>70%)')
     ]
     ax.legend(handles=legend_elements, loc='upper right', fontsize=8)
 
@@ -304,11 +311,11 @@ def render_ppl_curve(paragraph_results):
         ax.text(i + 1, ppl, f'{ppl:.1f}', ha='center', va='bottom', fontsize=8)
 
     # 添加阈值线
-    ax.axhline(y=50, color='gray', linestyle='--', alpha=0.5, linewidth=1, label='中等困惑度')
+    ax.axhline(y=50, color='gray', linestyle='--', alpha=0.5, linewidth=1, label='Medium PPL')
 
-    ax.set_xlabel('段落编号', fontsize=10)
-    ax.set_ylabel('困惑度 (PPL)', fontsize=10)
-    ax.set_title('各段落困惑度变化曲线', fontsize=12, fontweight='bold')
+    ax.set_xlabel('Paragraph No.', fontsize=10)
+    ax.set_ylabel('Perplexity (PPL)', fontsize=10)
+    ax.set_title('PPL by Paragraph', fontsize=12, fontweight='bold')
     ax.legend(loc='upper right', fontsize=8)
     ax.grid(True, alpha=0.3)
 
@@ -328,15 +335,15 @@ def render_ppl_distribution(all_ppl_values):
 
     # 添加均值线
     mean_ppl = np.mean(all_ppl_values)
-    ax.axvline(x=mean_ppl, color='red', linestyle='--', linewidth=2, label=f'均值: {mean_ppl:.1f}')
+    ax.axvline(x=mean_ppl, color='red', linestyle='--', linewidth=2, label=f'Mean: {mean_ppl:.1f}')
 
     # 添加中位数线
     median_ppl = np.median(all_ppl_values)
-    ax.axvline(x=median_ppl, color='orange', linestyle='--', linewidth=2, label=f'中位数: {median_ppl:.1f}')
+    ax.axvline(x=median_ppl, color='orange', linestyle='--', linewidth=2, label=f'Median: {median_ppl:.1f}')
 
-    ax.set_xlabel('困惑度 (PPL)', fontsize=10)
-    ax.set_ylabel('频次', fontsize=10)
-    ax.set_title('困惑度分布直方图', fontsize=12, fontweight='bold')
+    ax.set_xlabel('Perplexity (PPL)', fontsize=10)
+    ax.set_ylabel('Frequency', fontsize=10)
+    ax.set_title('PPL Distribution', fontsize=12, fontweight='bold')
     ax.legend(loc='upper right', fontsize=9)
     ax.grid(True, alpha=0.3, axis='y')
 
@@ -416,11 +423,11 @@ def main():
                 if st.button("切换语言模型", type="secondary"):
                     st.session_state.detector_loaded = False
                     st.rerun()
-        else:
-            st.success("✅ 模型已就绪")
-            if st.button("重新加载模型"):
-                st.session_state.detector_loaded = False
-                st.rerun()
+            else:
+                st.success("✅ 模型已就绪")
+                if st.button("重新加载模型"):
+                    st.session_state.detector_loaded = False
+                    st.rerun()
 
     # 主内容区
     st.title("AI作业原创性检测系统")
