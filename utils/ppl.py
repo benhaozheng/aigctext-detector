@@ -86,8 +86,10 @@ class PerplexityCalculator:
                     outputs = self.model(input_ids, labels=input_ids)
                     neg_log_likelihood = outputs.loss.item()
 
+                # 防止溢出：限制loss范围
+                neg_log_likelihood = max(min(neg_log_likelihood, 50), -50)
                 ppl = np.exp(neg_log_likelihood)
-                return float(ppl)
+                return float(min(ppl, 1e6))  # 限制PPL上限
 
             # 长文本使用滑动窗口计算
             nlls = []
@@ -97,18 +99,31 @@ class PerplexityCalculator:
 
                 target_len = end_loc - i
 
+                if target_len <= 0:
+                    continue
+
                 input_batch = input_ids[:, begin_loc:end_loc]
 
                 with torch.no_grad():
                     outputs = self.model(input_batch, labels=input_batch)
                     neg_log_likelihood = outputs.loss * target_len
+                    # 防止NaN/Inf
+                    if neg_log_likelihood == neg_log_likelihood and neg_log_likelihood < 1e6:
+                        nlls.append(neg_log_likelihood)
 
-                nlls.append(neg_log_likelihood)
+            if not nlls:
+                return 100.0
 
-            # 平均困惑度
-            ppl = np.exp(torch.stack(nlls).sum() / end_loc)
+            # 平均困惑度，防止溢出 - 使用torch而不是numpy
+            total_nll = torch.stack(nlls).sum()
+            if total_nll > 1e6 or total_nll != total_nll:  # NaN或过大
+                return 100.0
 
-            return float(ppl.item())
+            avg_nll = total_nll / end_loc
+            # 先转CPU再限制范围
+            avg_nll = avg_nll.clamp(-50, 50)  # 限制范围
+            ppl = torch.exp(avg_nll)
+            return float(min(ppl.item(), 1e6))  # 限制PPL上限
 
         except Exception as e:
             print(f"计算困惑度时出错: {e}")

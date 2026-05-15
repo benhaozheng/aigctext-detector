@@ -42,12 +42,12 @@ class FusionMLP(nn.Module):
     """融合网络的MLP部分"""
 
     def __init__(self, bert_dim: int = 768, feature_dim: int = 11,
-                 hidden_dims: List[int] = [512, 256, 128], dropout: float = 0.3):
+                 hidden_dims: List[int] = [256, 128, 64], dropout: float = 0.3):
         """
         Args:
             bert_dim: BERT embedding维度
             feature_dim: 手工特征维度
-            hidden_dims: 隐藏层维度列表
+            hidden_dims: 隐藏层维度列表（必须与训练时一致）
             dropout: Dropout概率
         """
         super(FusionMLP, self).__init__()
@@ -108,13 +108,13 @@ class FusionModel:
     """融合模型包装类"""
 
     def __init__(self, bert_model=None, feature_dim: int = 11,
-                 device: str = None, hidden_dims: List[int] = [512, 256, 128]):
+                 device: str = None, hidden_dims: List[int] = [256, 128, 64]):
         """
         Args:
             bert_model: BERT模型实例
             feature_dim: 手工特征维度
             device: 计算设备
-            hidden_dims: MLP隐藏层维度
+            hidden_dims: MLP隐藏层维度（必须与训练时一致）
         """
         self.bert_model = bert_model
         self.feature_dim = feature_dim

@@ -62,15 +62,15 @@ class FeatureExtractor:
         # 组装特征字典
         features = {
             # 统计特征
-            'ppl': ppl if ppl is not None else 100.0,
-            'ttr': ttr,
-            'sentence_length_mean': sent_mean,
-            'sentence_length_var': sent_var,
-            'repetition_rate': repeat_rate,
+            'ppl': ppl if (ppl is not None and ppl == ppl and ppl > 0) else 100.0,  # NaN检查
+            'ttr': ttr if ttr == ttr else 0.0,  # NaN检查
+            'sentence_length_mean': sent_mean if sent_mean == sent_mean else 0.0,
+            'sentence_length_var': sent_var if sent_var == sent_var else 0.0,
+            'repetition_rate': repeat_rate if repeat_rate == repeat_rate else 0.0,
 
             # 语言学特征
-            'syntactic_complexity': syntactic_complexity,
-            'hwv': hwv,
+            'syntactic_complexity': syntactic_complexity if syntactic_complexity == syntactic_complexity else 0.0,
+            'hwv': hwv if hwv == hwv else 0.0,
 
             # 补充特征
             'avg_word_length': self.calculate_avg_word_length(tokens),
@@ -78,6 +78,12 @@ class FeatureExtractor:
             'pos_diversity': self.calculate_pos_diversity(text),
             'function_word_ratio': self.calculate_function_word_ratio(text),
         }
+
+        # 二次检查所有特征值，确保没有NaN或无穷大
+        for key, value in features.items():
+            if value != value or value > 1e10:  # NaN或过大值
+                features[key] = 0.0
+                print(f"警告: 特征 {key} 值异常: {value}，已设为0")
 
         return features
 

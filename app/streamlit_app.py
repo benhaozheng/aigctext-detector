@@ -35,6 +35,7 @@ from utils.preprocess import TextPreprocessor
 from utils.features import FeatureExtractor
 from utils.advice import AdviceGenerator
 from utils.language_detector import LanguageDetector
+from utils.ppl import PerplexityCalculator
 
 
 # 初始化session state
@@ -45,6 +46,7 @@ if 'detector_loaded' not in st.session_state:
     st.session_state.preprocessor = None
     st.session_state.feature_extractor = None
     st.session_state.advice_generator = None
+    st.session_state.ppl_calculator = None
 
 
 @st.cache_resource
@@ -66,22 +68,30 @@ def load_models(language: str = 'zh'):
             model_name = 'bert-base-chinese'
             checkpoint_base = './checkpoints/bert_zh'
 
-        # 加载BERT
-        bert = BERTClassifier(
-            model_name=model_name,
-            num_labels=2,
-            device=device
-        )
-
-        # 尝试加载检查点
+        # 加载BERT - 优先使用本地检查点
         if os.path.exists(checkpoint_base):
             try:
-                bert.load_from_checkpoint(checkpoint_base)
+                print(f"从本地检查点加载BERT: {checkpoint_base}")
+                bert = BERTClassifier(
+                    model_name=checkpoint_base,  # 直接使用本地路径
+                    num_labels=2,
+                    device=device
+                )
                 print(f"✅ BERT检查点加载成功: {checkpoint_base}")
             except Exception as e:
-                print(f"⚠️ BERT检查点加载失败: {e}")
+                print(f"⚠️ BERT检查点加载失败: {e}，尝试使用在线模型")
+                bert = BERTClassifier(
+                    model_name=model_name,
+                    num_labels=2,
+                    device=device
+                )
         else:
-            print(f"⚠️ BERT检查点不存在: {checkpoint_base}")
+            print(f"⚠️ BERT检查点不存在: {checkpoint_base}，使用在线模型")
+            bert = BERTClassifier(
+                model_name=model_name,
+                num_labels=2,
+                device=device
+            )
 
         # 加载融合模型（使用与训练时相同的hidden_dims）
         fusion = FusionModel(
@@ -92,6 +102,9 @@ def load_models(language: str = 'zh'):
         )
 
         fusion_checkpoint = f"./checkpoints/fusion_{language}_best.pt"
+        # auto模式使用zh的检查点
+        if language == 'auto' and not os.path.exists(fusion_checkpoint):
+            fusion_checkpoint = "./checkpoints/fusion_zh_best.pt"
         if os.path.exists(fusion_checkpoint):
             try:
                 fusion.load_model(fusion_checkpoint)
@@ -106,10 +119,18 @@ def load_models(language: str = 'zh'):
         feature_extractor = FeatureExtractor()
         advice_generator = AdviceGenerator()
 
-        return bert, fusion, preprocessor, feature_extractor, advice_generator
+        # 初始化PPL计算器（中文GPT2模型）
+        try:
+            ppl_calculator = PerplexityCalculator(model_name="IDEA-CCNL/Wenzhong-GPT2-110M", device=device)
+            print("✅ PPL计算器加载成功")
+        except Exception as e:
+            print(f"⚠️ PPL计算器加载失败: {e}")
+            ppl_calculator = None
+
+        return bert, fusion, preprocessor, feature_extractor, advice_generator, ppl_calculator
 
 
-def detect_text(text, model_type, bert, fusion, preprocessor, feature_extractor, advice_generator):
+def detect_text(text, model_type, bert, fusion, preprocessor, feature_extractor, advice_generator, ppl_calculator=None):
     """检测文本"""
     if not text or len(text.strip()) == 0:
         return None
@@ -118,8 +139,22 @@ def detect_text(text, model_type, bert, fusion, preprocessor, feature_extractor,
     cleaned = preprocessor.clean_text(text)
     paragraphs = preprocessor.split_paragraphs(cleaned)
 
+    # 计算PPL（如果有PPL计算器）
+    ppl = None
+    if ppl_calculator is not None:
+        try:
+            ppl = ppl_calculator.calculate_perplexity(cleaned)
+            # 检查PPL是否有效
+            if not isinstance(ppl, (int, float)) or ppl != ppl or ppl <= 0:  # NaN检查：ppl != ppl
+                print(f"无效的PPL值: {ppl}，使用默认值")
+                ppl = 100.0
+            print(f"PPL: {ppl:.2f}")
+        except Exception as e:
+            print(f"PPL计算失败: {e}，使用默认值")
+            ppl = 100.0
+
     # 提取特征
-    features = feature_extractor.extract_all_features(cleaned)
+    features = feature_extractor.extract_all_features(cleaned, ppl=ppl)
 
     # 预测
     if model_type == "融合模型 (推荐)":
@@ -128,22 +163,45 @@ def detect_text(text, model_type, bert, fusion, preprocessor, feature_extractor,
         result = bert.predict(cleaned)
 
     ai_prob = result['ai_probability']
+
+    # 检查AI概率是否有效
+    if ai_prob != ai_prob or ai_prob < 0 or ai_prob > 1:  # NaN检查
+        print(f"无效的AI概率: {ai_prob}，使用BERT预测")
+        # 如果Fusion预测失败，回退到BERT
+        result = bert.predict(cleaned)
+        ai_prob = result['ai_probability']
+        # 检查BERT预测是否也有效
+        if ai_prob != ai_prob:
+            ai_prob = 0.5  # 完全不确定时默认0.5
+
     originality_score = (1 - ai_prob) * 100
 
     # 段落级检测
     paragraph_results = []
     for para in paragraphs:
         if model_type == "融合模型 (推荐)":
-            para_features = feature_extractor.extract_all_features(para)
+            # 计算段落PPL
+            para_ppl = None
+            if ppl_calculator is not None:
+                try:
+                    para_ppl = ppl_calculator.calculate_perplexity(para)
+                    # 检查PPL是否有效
+                    if not isinstance(para_ppl, (int, float)) or para_ppl != para_ppl or para_ppl <= 0:
+                        para_ppl = 100.0
+                except:
+                    para_ppl = 100.0
+            para_features = feature_extractor.extract_all_features(para, ppl=para_ppl)
             para_result = fusion.predict(para, para_features)
         else:
             para_result = bert.predict(para)
 
-        paragraph_results.append({
-            'text': para,
-            'ai_probability': para_result['ai_probability'],
-            'label': para_result['label']
-        })
+        # 检查预测结果是否有效
+        if 'ai_probability' in para_result and para_result['ai_probability'] == para_result['ai_probability']:
+            paragraph_results.append({
+                'text': para,
+                'ai_probability': para_result['ai_probability'],
+                'label': para_result['label']
+            })
 
     # 生成建议
     advices = advice_generator.generate_advice(cleaned, ai_prob, features)
@@ -251,7 +309,17 @@ def render_feature_radar(features):
 
 def render_paragraph_risk(paragraph_results):
     """渲染段落风险图"""
-    fig, ax = plt.subplots(figsize=(10, 4))
+    num_paragraphs = len(paragraph_results)
+
+    # 根据段落数调整图表大小
+    if num_paragraphs > 20:
+        fig_width = 15
+    elif num_paragraphs > 10:
+        fig_width = 12
+    else:
+        fig_width = 10
+
+    fig, ax = plt.subplots(figsize=(fig_width, 4))
 
     ai_probs = [p['ai_probability'] for p in paragraph_results]
     x_pos = range(1, len(paragraph_results) + 1)
@@ -268,10 +336,13 @@ def render_paragraph_risk(paragraph_results):
 
     ax.set_xlabel('Paragraph No.', fontsize=10)
     ax.set_ylabel('AI Probability', fontsize=10)
-    ax.set_title('AI Probability by Paragraph', fontsize=12, fontweight='bold')
+    ax.set_title(f'AI Probability by Paragraph ({num_paragraphs} paragraphs)', fontsize=12, fontweight='bold')
     ax.axhline(y=0.3, color='gray', linestyle='--', alpha=0.3, linewidth=1)
     ax.axhline(y=0.7, color='gray', linestyle='--', alpha=0.3, linewidth=1)
     ax.set_ylim(0, 1)
+
+    # 设置x轴范围，确保所有段落都显示
+    ax.set_xlim(0, num_paragraphs + 1)
 
     # 添加图例
     from matplotlib.patches import Patch
@@ -288,7 +359,17 @@ def render_paragraph_risk(paragraph_results):
 
 def render_ppl_curve(paragraph_results):
     """渲染段落PPL变化曲线"""
-    fig, ax = plt.subplots(figsize=(10, 4))
+    num_paragraphs = len(paragraph_results)
+
+    # 根据段落数调整图表大小
+    if num_paragraphs > 20:
+        fig_width = 15
+    elif num_paragraphs > 10:
+        fig_width = 12
+    else:
+        fig_width = 10
+
+    fig, ax = plt.subplots(figsize=(fig_width, 4))
 
     # 提取PPL值（如果有的话）
     ppl_values = []
@@ -315,9 +396,10 @@ def render_ppl_curve(paragraph_results):
 
     ax.set_xlabel('Paragraph No.', fontsize=10)
     ax.set_ylabel('Perplexity (PPL)', fontsize=10)
-    ax.set_title('PPL by Paragraph', fontsize=12, fontweight='bold')
+    ax.set_title(f'PPL by Paragraph ({num_paragraphs} paragraphs)', fontsize=12, fontweight='bold')
     ax.legend(loc='upper right', fontsize=8)
     ax.grid(True, alpha=0.3)
+    ax.set_xlim(0, num_paragraphs + 1)
 
     plt.tight_layout()
     return fig
@@ -403,13 +485,14 @@ def main():
         if not st.session_state.detector_loaded:
             if st.button("加载模型", type="primary"):
                 try:
-                    bert, fusion, preprocessor, feature_extractor, advice_generator = load_models(selected_language)
+                    bert, fusion, preprocessor, feature_extractor, advice_generator, ppl_calculator = load_models(selected_language)
 
                     st.session_state.bert_model = bert
                     st.session_state.fusion_model = fusion
                     st.session_state.preprocessor = preprocessor
                     st.session_state.feature_extractor = feature_extractor
                     st.session_state.advice_generator = advice_generator
+                    st.session_state.ppl_calculator = ppl_calculator
                     st.session_state.detector_loaded = True
                     st.session_state.current_language = selected_language
 
@@ -483,7 +566,8 @@ def main():
                     st.session_state.fusion_model,
                     st.session_state.preprocessor,
                     st.session_state.feature_extractor,
-                    st.session_state.advice_generator
+                    st.session_state.advice_generator,
+                    st.session_state.ppl_calculator
                 )
 
             if result:

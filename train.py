@@ -69,12 +69,23 @@ def load_sample_data(csv_path: str = "./data/sample_data.csv"):
                 df = df.dropna(subset=['text', 'label'])
                 df['text'] = df['text'].astype(str)
 
-                # 🔧 统一label格式（处理大小写不一致问题）
-                df['label'] = df['label'].str.strip().str.lower()
-                df['label'] = df['label'].replace({
-                    'ai': 'AI',
-                    'human': 'Human'
-                })
+                # 🔧 统一label格式（处理大小写不一致问题和数字标签）
+                # 首先检查是否是数字标签格式
+                if df['label'].dtype in ['int64', 'float64', 'int32', 'float32']:
+                    # 数字标签：0=Human, 1=AI
+                    df['label'] = df['label'].map({0: 'Human', 1: 'AI'})
+                    print(f"   检测到数字标签格式，已转换：0->Human, 1->AI")
+                else:
+                    # 字符串标签：处理大小写不一致问题
+                    df['label'] = df['label'].astype(str).str.strip().str.lower()
+                    df['label'] = df['label'].replace({
+                        'ai': 'AI',
+                        'human': 'Human',
+                        '0': 'Human',  # 处理字符串形式的数字
+                        '1': 'AI',
+                        '0.0': 'Human',
+                        '1.0': 'AI'
+                    })
 
                 # 过滤空文本和无效标签
                 df = df[df['text'].str.len() > 10]
@@ -420,9 +431,9 @@ def compare_models(bert, fusion, val_texts, val_labels, val_features):
 def main():
     """主函数"""
     parser = argparse.ArgumentParser(description='训练AI检测模型')
-    # 默认使用中文HC3数据集 + 示例数据
+    # 默认使用新数据集 + HC3数据集 + 示例数据
     parser.add_argument('--data', type=str,
-                       default='./data/hc3_all_fixed.csv,./data/ai_vs_human_text_2026.csv,./data/sample_data.csv',
+                       default='./data/chinese_ai_detection.csv,./data/hc3_all_fixed.csv,./data/sample_data.csv',
                        help='训练数据CSV文件路径（支持多个文件，用逗号分隔）')
     parser.add_argument('--bert_epochs', type=int, default=3, help='BERT训练轮数')
     parser.add_argument('--fusion_epochs', type=int, default=10, help='融合模型训练轮数')
